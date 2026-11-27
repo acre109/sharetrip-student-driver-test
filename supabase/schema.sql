@@ -88,3 +88,46 @@ end; $$;
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
 for each row execute procedure public.handle_new_user();
+
+
+-- Student's live pickup location, visible only to the driver on their accepted ride request.
+create table if not exists public.student_locations (
+ student_id uuid primary key references public.profiles(id) on delete cascade,
+ ride_id uuid not null references public.rides(id) on delete cascade,
+ latitude double precision not null check(latitude between -90 and 90),
+ longitude double precision not null check(longitude between -180 and 180),
+ accuracy_m double precision,
+ updated_at timestamptz not null default now()
+);
+alter table public.student_locations enable row level security;
+create policy "students publish own live pickup location" on public.student_locations
+ for all to authenticated using(student_id=auth.uid())
+ with check(student_id=auth.uid() and exists(
+   select 1 from public.ride_requests rr
+   where rr.ride_id=student_locations.ride_id and rr.student_id=auth.uid()
+     and rr.status in ('pending','accepted')
+ ));
+create policy "assigned driver can view waiting student location" on public.student_locations
+ for select to authenticated using(exists(
+   select 1 from public.ride_requests rr join public.rides r on r.id=rr.ride_id
+   where rr.ride_id=student_locations.ride_id and rr.student_id=student_locations.student_id
+     and r.driver_id=auth.uid() and rr.status in ('pending','accepted')
+ ));
+
+-- Realtime subscriptions used by student/driver live tracking and chat.
+-- Run once; duplicate publication membership is ignored.
+do $$
+begin
+  alter publication supabase_realtime add table public.student_locations;
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter publication supabase_realtime add table public.driver_locations;
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter publication supabase_realtime add table public.messages;
+exception when duplicate_object then null;
+end $$;

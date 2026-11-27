@@ -68,16 +68,53 @@ Future<List<Map<String, dynamic>>> findRides({String? destination}) async {
     final id=currentUser?.id; if(id==null) throw StateError('Sign in first');
     await client.from('messages').insert({'conversation_id':conversationId,'sender_id':id,'body':body.trim()});
   }
-  Stream<List<Map<String,dynamic>>> watchMessages(String conversationId) => client.from('messages').stream(primaryKey:['id']).eq('conversation_id',conversationId).order('created_at').map((rows)=>List<Map<String,dynamic>>.from(rows));
+  Stream<List<Map<String,dynamic>>> watchMessages(String conversationId) =>
+      client.from('messages').stream(primaryKey: ['id']).map((rows) =>
+        rows.where((row) => row['conversation_id'] == conversationId).toList()
+          ..sort((a, b) => (a['created_at'] as String).compareTo(b['created_at'] as String)));
   Future<void> upsertDriverLocation({required double latitude,required double longitude,required double accuracy,String? activeRideId}) async {
     final id=currentUser?.id; if(id==null) throw StateError('Sign in first');
     await client.from('driver_locations').upsert({'driver_id':id,'ride_id':activeRideId,'latitude':latitude,'longitude':longitude,'accuracy_m':accuracy,'updated_at':DateTime.now().toUtc().toIso8601String()});
   }
-  Stream<List<Map<String,dynamic>>> watchDriverLocation(String driverId) => client.from('driver_locations').stream(primaryKey:['driver_id']).eq('driver_id',driverId).map((rows)=>List<Map<String,dynamic>>.from(rows));
+  Stream<List<Map<String,dynamic>>> watchDriverLocation(String driverId) =>
+      client.from('driver_locations').stream(primaryKey: ['driver_id']).map((rows) =>
+        rows.where((row) => row['driver_id'] == driverId).toList());
   Future<void> createEmergencyAlert({required String message,required double latitude,required double longitude}) async {
     final id=currentUser?.id; if(id==null) throw StateError('Sign in first');
     await client.from('emergency_alerts').insert({'reporter_id':id,'message':message,'latitude':latitude,'longitude':longitude,'status':'open'});
   }
+  Future<void> upsertStudentLocation({required String rideId, required double latitude,
+    required double longitude, required double accuracy}) async {
+    final id = currentUser?.id;
+    if (id == null) throw StateError('Sign in first');
+    await client.from('student_locations').upsert({
+      'student_id': id, 'ride_id': rideId, 'latitude': latitude,
+      'longitude': longitude, 'accuracy_m': accuracy,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    });
+  }
+
+  Future<void> clearMyStudentLocation(String rideId) async {
+    final id = currentUser?.id;
+    if (id == null) return;
+    await client.from('student_locations').delete()
+      .eq('student_id', id).eq('ride_id', rideId);
+  }
+
+  Stream<List<Map<String, dynamic>>> watchStudentLocation(String studentId, String rideId) =>
+      client.from('student_locations').stream(primaryKey: ['student_id']).map((rows) =>
+        rows.where((row) => row['student_id'] == studentId && row['ride_id'] == rideId).toList());
+
+  Future<List<Map<String, dynamic>>> getMyRideRequests() async {
+    final id = currentUser?.id;
+    if (id == null) throw StateError('Sign in first');
+    return List<Map<String, dynamic>>.from(await client
+      .from('ride_requests')
+      .select('id, student_id, status, ride_id, profiles:student_id(full_name), rides!inner(driver_id,pickup,destination)')
+      .eq('rides.driver_id', id)
+      .inFilter('status', ['pending', 'accepted']));
+  }
+
   Future<void> savePushToken(String token,{required String platform}) async {
     final id=currentUser?.id; if(id==null) return;
     await client.from('device_tokens').upsert({'user_id':id,'token':token,'platform':platform,'updated_at':DateTime.now().toUtc().toIso8601String()});

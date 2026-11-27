@@ -1,17 +1,17 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import '../../../core/constants/app_colors.dart';
+import 'driver_pickup_navigation_page.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/driver_notification_service.dart';
 import '../../../core/services/driver_safety_service.dart';
 import '../shared/driver_chat_page.dart';
 import '../../core/services/sharetrip_local_store.dart';
+import '../../core/services/backend_service.dart';
 
 class DriverLoginPage extends StatefulWidget {
   const DriverLoginPage({super.key});
@@ -777,114 +777,61 @@ class _DriverLiveTripScreen extends StatefulWidget {
 
 class _DriverLiveTripScreenState extends State<_DriverLiveTripScreen> {
   final LocationService _location = LocationService();
-  final MapController _mapController = MapController();
-  final TextEditingController _pickupController = TextEditingController(text: 'Bitin Junction, Bay, Laguna, Philippines');
-  final TextEditingController _destinationController = TextEditingController(text: 'CMDI Main Campus, Pila, Laguna, Philippines');
+  final MapController _driverMapController = MapController();
+  bool _driverMapReady = false;
   StreamSubscription<Position>? _positionSubscription;
   Position? _latestPosition;
-  LatLng? _pickupPoint;
-  LatLng? _destinationPoint;
-  List<LatLng> _routePoints = [];
   bool _tracking = false;
   bool _loadingLocation = false;
-  bool _routeLoading = false;
-  bool _mapReady = false;
-  bool _followDriver = true;
   bool _checkedIn = true;
-  bool _isResolvingAddresses = false;
   String _stage = 'Heading to pickup';
   String? _gpsError;
-  String? _routeError;
-  double? _remainingKm;
-  double? _etaMinutes;
-  LatLng? _lastRoutedFrom;
-  DateTime? _lastRouteTime;
-
-  LatLng get _driverPoint => LatLng(_latestPosition!.latitude, _latestPosition!.longitude);
-  LatLng? get _activeTarget => _stage == 'Heading to pickup' ? _pickupPoint : _destinationPoint;
-
-  Future<LatLng> _geocode(String address) async {
-    final uri = Uri.https('nominatim.openstreetmap.org', '/search', {'q': address, 'format': 'jsonv2', 'limit': '1'});
-    final response = await http.get(uri, headers: {'User-Agent': 'ShareTrip/1.0 (driver navigation)'}).timeout(const Duration(seconds: 15));
-    if (response.statusCode != 200) throw Exception('Could not find "$address". Check the place name and try again.');
-    final rows = jsonDecode(response.body) as List;
-    if (rows.isEmpty) throw Exception('No map result for "$address". Try a more complete address.');
-    return LatLng(double.parse(rows.first['lat'].toString()), double.parse(rows.first['lon'].toString()));
-  }
-
-  Future<void> _resolveTripAddresses() async {
-    setState(() { _isResolvingAddresses = true; _routeError = null; });
-    try {
-      final pickup = await _geocode(_pickupController.text.trim());
-      final destination = await _geocode(_destinationController.text.trim());
-      if (!mounted) return;
-      setState(() { _pickupPoint = pickup; _destinationPoint = destination; });
-      if (_latestPosition != null) await _loadRoadRoute(_driverPoint, _activeTarget!, force: true);
-      if (_mapReady) _fitRouteOrDriver();
-    } catch (e) {
-      if (mounted) setState(() => _routeError = e.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() => _isResolvingAddresses = false);
-    }
-  }
-
-  Future<void> _loadRoadRoute(LatLng start, LatLng target, {bool force = false}) async {
-    if (_routeLoading) return;
-    if (!force && _lastRoutedFrom != null) {
-      final moved = const Distance().as(LengthUnit.Meter, _lastRoutedFrom!, start);
-      final elapsed = DateTime.now().difference(_lastRouteTime ?? DateTime.fromMillisecondsSinceEpoch(0));
-      if (moved < 40 && elapsed.inSeconds < 20) return;
-    }
-    setState(() { _routeLoading = true; _routeError = null; });
-    try {
-      final coordinates = '${start.longitude},${start.latitude};${target.longitude},${target.latitude}';
-      final uri = Uri.parse('https://router.project-osrm.org/route/v1/driving/$coordinates?overview=full&geometries=geojson');
-      final response = await http.get(uri, headers: {'Accept': 'application/json'}).timeout(const Duration(seconds: 20));
-      if (response.statusCode != 200) throw Exception('Routing service is unavailable.');
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      if (data['code'] != 'Ok' || (data['routes'] as List).isEmpty) throw Exception('No drivable road route found between these locations.');
-      final route = (data['routes'] as List).first as Map<String, dynamic>;
-      final coords = (route['geometry']['coordinates'] as List);
-      final points = coords.map<LatLng>((v) => LatLng((v[1] as num).toDouble(), (v[0] as num).toDouble())).toList();
-      if (!mounted) return;
-      setState(() {
-        _routePoints = points;
-        _remainingKm = (route['distance'] as num).toDouble() / 1000;
-        _etaMinutes = (route['duration'] as num).toDouble() / 60;
-        _lastRoutedFrom = start;
-        _lastRouteTime = DateTime.now();
-      });
-      if (_mapReady && _routePoints.isNotEmpty) _fitRouteOrDriver();
-    } catch (e) {
-      if (mounted) setState(() => _routeError = e.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() => _routeLoading = false);
-    }
-  }
 
   Future<void> _startTracking() async {
     await _positionSubscription?.cancel();
     setState(() { _loadingLocation = true; _gpsError = null; });
     try {
+      // Use the same LocationService as the student map/tracking flow.
       final firstFix = await _location.getCurrentLocation();
       if (!mounted) return;
       setState(() { _latestPosition = firstFix; _loadingLocation = false; _tracking = true; });
-      _moveToDriver();
-      if (_pickupPoint == null || _destinationPoint == null) await _resolveTripAddresses();
-      if (_activeTarget != null) await _loadRoadRoute(_driverPoint, _activeTarget!, force: true);
-      _positionSubscription = _location.getLocationStream().listen((position) {
-        if (!mounted) return;
-        final previous = _latestPosition;
-        setState(() => _latestPosition = position);
-        if (_followDriver) _moveToDriver();
-        if (_activeTarget != null) _loadRoadRoute(LatLng(position.latitude, position.longitude), _activeTarget!);
-        if (previous != null && _stage == 'Heading to pickup' && _pickupPoint != null) {
-          final distance = const Distance().as(LengthUnit.Meter, _driverPoint, _pickupPoint!);
-          if (distance <= 35) _setStage('Passenger picked up');
-        }
-      }, onError: (Object error) {
-        if (mounted) setState(() { _gpsError = _friendlyGpsError(error); _tracking = false; });
-      });
+      if (_driverMapReady) {
+        _driverMapController.move(LatLng(firstFix.latitude, firstFix.longitude), 16);
+      }
+      try {
+        await BackendService.instance.upsertDriverLocation(
+          latitude: firstFix.latitude,
+          longitude: firstFix.longitude,
+          accuracy: firstFix.accuracy,
+        );
+      } catch (e) {
+        if (mounted) setState(() => _gpsError = 'GPS is active, but cloud sharing failed: $e');
+      }
+      _positionSubscription = _location.getLocationStream().listen(
+        (position) {
+          if (mounted) {
+            setState(() => _latestPosition = position);
+            if (_driverMapReady) {
+              _driverMapController.move(
+                LatLng(position.latitude, position.longitude),
+                16,
+              );
+            }
+            try {
+              BackendService.instance.upsertDriverLocation(
+                latitude: position.latitude,
+                longitude: position.longitude,
+                accuracy: position.accuracy,
+              ).catchError((e) {
+                if (mounted) setState(() => _gpsError = 'Cloud GPS update failed: $e');
+              });
+            } catch (_) {}
+          }
+        },
+        onError: (Object error) {
+          if (mounted) setState(() { _gpsError = _friendlyGpsError(error); _tracking = false; });
+        },
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() { _loadingLocation = false; _tracking = false; _gpsError = _friendlyGpsError(error); });
@@ -893,15 +840,13 @@ class _DriverLiveTripScreenState extends State<_DriverLiveTripScreen> {
 
   String _friendlyGpsError(Object error) {
     final value = error.toString();
-    if (value.toLowerCase().contains('permission')) return 'Location permission is blocked. Allow location access in browser/device settings, then try again.';
-    if (value.toLowerCase().contains('disabled')) return 'Turn on device location services and try again.';
+    if (value.toLowerCase().contains('permission')) {
+      return 'Location permission is blocked. Allow location access in your browser/device settings, then try again.';
+    }
+    if (value.toLowerCase().contains('disabled')) {
+      return 'Turn on device location services and try again.';
+    }
     return 'Could not get a GPS fix: $value';
-  }
-
-  void _setStage(String value) {
-    setState(() => _stage = value);
-    widget.onStatusChanged(value);
-    if (_latestPosition != null && _activeTarget != null) _loadRoadRoute(_driverPoint, _activeTarget!, force: true);
   }
 
   Future<void> _stopTracking() async {
@@ -910,87 +855,151 @@ class _DriverLiveTripScreenState extends State<_DriverLiveTripScreen> {
     if (mounted) setState(() => _tracking = false);
   }
 
-  void _moveToDriver() {
-    if (!_mapReady || _latestPosition == null) return;
-    _mapController.move(_driverPoint, 16.5);
-  }
-
-  void _fitRouteOrDriver() {
-    if (!_mapReady) return;
-    final points = <LatLng>[..._routePoints];
-    if (_latestPosition != null) points.add(_driverPoint);
-    if (points.length >= 2) {
-      _mapController.fitCamera(CameraFit.coordinates(coordinates: points, padding: const EdgeInsets.all(55), maxZoom: 16));
-    } else if (points.isNotEmpty) {
-      _mapController.move(points.first, 15);
-    }
-  }
-
   @override
   void dispose() {
     _positionSubscription?.cancel();
-    _pickupController.dispose();
-    _destinationController.dispose();
     super.dispose();
   }
 
-  Widget _mapMarker(IconData icon, Color color) => Icon(icon, color: color, size: 42, shadows: const [Shadow(color: Colors.white, blurRadius: 4)]);
-
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Live Driver Navigation')),
-    body: Column(children: [
-      Expanded(flex: 6, child: Stack(children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: const LatLng(14.1775, 121.2830), initialZoom: 14,
-            onMapReady: () { _mapReady = true; if (_latestPosition != null) _moveToDriver(); else _fitRouteOrDriver(); },
-            onPositionChanged: (camera, gesture) { if (gesture && _followDriver) setState(() => _followDriver = false); },
+    appBar: AppBar(title: const Text('Active Trip')),
+    body: ListView(padding: const EdgeInsets.all(18), children: [
+      Card(
+        clipBehavior: Clip.antiAlias,
+        child: SizedBox(
+          height: 360,
+          child: Stack(
+            children: [
+              FlutterMap(
+                mapController: _driverMapController,
+                options: MapOptions(
+                  initialCenter: _latestPosition == null
+                      ? const LatLng(14.1775, 121.2830)
+                      : LatLng(_latestPosition!.latitude, _latestPosition!.longitude),
+                  initialZoom: 16,
+                  onMapReady: () {
+                    _driverMapReady = true;
+                    final p = _latestPosition;
+                    if (p != null) {
+                      _driverMapController.move(LatLng(p.latitude, p.longitude), 16);
+                    }
+                  },
+                ),
+                children: [
+                  TileLayer(
+                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.sharetrip.app',
+                  ),
+                  if (_latestPosition != null)
+                    MarkerLayer(markers: [
+                      Marker(
+                        point: LatLng(_latestPosition!.latitude, _latestPosition!.longitude),
+                        width: 48,
+                        height: 52,
+                        child: const Icon(Icons.navigation, color: Colors.blue, size: 42),
+                      ),
+                    ]),
+                  const RichAttributionWidget(attributions: [
+                    TextSourceAttribution('OpenStreetMap contributors'),
+                  ]),
+                ],
+              ),
+              Positioned(
+                top: 12, left: 12, right: 12,
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Row(children: [
+                      Icon(Icons.gps_fixed, color: _tracking ? Colors.green : AppColors.primary),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(
+                        _loadingLocation ? 'Getting live GPS fix…' :
+                        _tracking ? 'Live driver location is active' :
+                        'Driver map · GPS stopped',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      )),
+                      if (_tracking) const Icon(Icons.circle, color: Colors.green, size: 10),
+                    ]),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 12, bottom: 12,
+                child: FloatingActionButton.small(
+                  heroTag: 'driver_active_trip_recenter',
+                  backgroundColor: Colors.white,
+                  foregroundColor: AppColors.primary,
+                  onPressed: () {
+                    final p = _latestPosition;
+                    if (p != null && _driverMapReady) {
+                      _driverMapController.move(LatLng(p.latitude, p.longitude), 17);
+                    }
+                  },
+                  child: const Icon(Icons.my_location),
+                ),
+              ),
+            ],
           ),
-          children: [
-            TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.sharetrip.app'),
-            if (_routePoints.isNotEmpty) PolylineLayer(polylines: [Polyline(points: _routePoints, strokeWidth: 7, color: AppColors.primary, borderStrokeWidth: 2, borderColor: Colors.white)]),
-            MarkerLayer(markers: [
-              if (_pickupPoint != null) Marker(point: _pickupPoint!, width: 44, height: 48, child: _mapMarker(Icons.location_on, Colors.green)),
-              if (_destinationPoint != null) Marker(point: _destinationPoint!, width: 44, height: 48, child: _mapMarker(Icons.location_on, Colors.red)),
-              if (_latestPosition != null) Marker(point: _driverPoint, width: 50, height: 50, child: Container(decoration: BoxDecoration(color: Colors.blue.withOpacity(.18), shape: BoxShape.circle, border: Border.all(color: Colors.blue, width: 2)), child: const Center(child: Icon(Icons.navigation, color: Colors.blue, size: 28)))),
-            ]),
-            RichAttributionWidget(attributions: [TextSourceAttribution('OpenStreetMap contributors')]),
-          ],
         ),
-        Positioned(top: 12, left: 12, right: 12, child: Card(child: Padding(padding: const EdgeInsets.all(13), child: Row(children: [
-          Icon(_gpsError != null ? Icons.location_disabled : (_tracking ? Icons.navigation : Icons.gps_fixed), color: AppColors.primary),
-          const SizedBox(width: 10), Expanded(child: Text(_gpsError ?? (_loadingLocation ? 'Acquiring GPS location…' : _tracking ? (_routeLoading ? 'GPS active · Updating road route…' : 'Live navigation is active') : 'Start live GPS to show your location and road route'), style: const TextStyle(fontWeight: FontWeight.w600))),
-          if (_routeLoading) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-        ])))),
-        Positioned(right: 14, bottom: 14, child: FloatingActionButton.small(heroTag: 'driver_recenter', backgroundColor: Colors.white, foregroundColor: AppColors.primary, onPressed: () { _followDriver = true; _moveToDriver(); }, child: const Icon(Icons.my_location))),
+      ),
+      Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('DRIVER GPS TRACKING', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        if (_latestPosition != null) Text('GPS accuracy: ${_latestPosition!.accuracy.toStringAsFixed(0)} m · Speed: ${(_latestPosition!.speed * 3.6).toStringAsFixed(1)} km/h'),
+        if (_gpsError != null) Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(_gpsError!, style: const TextStyle(color: Colors.red)),
+        ),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(child: ElevatedButton.icon(
+            onPressed: _tracking || _loadingLocation ? null : _startTracking,
+            icon: const Icon(Icons.gps_fixed),
+            label: Text(_loadingLocation ? 'Getting GPS…' : 'Start live GPS'),
+          )),
+          const SizedBox(width: 8),
+          OutlinedButton(onPressed: _tracking ? _stopTracking : null, child: const Text('Stop')),
+        ]),
+        const SizedBox(height: 6),
+        const Text('Allow location permission and run on localhost or HTTPS. The map follows your live GPS position.', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+      ]))),
+      Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const Text('STUDENT PICKUP NAVIGATION', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 6),
+        const Text('Enter the student account ID and the real Supabase ride UUID to follow their shared live pickup location.'),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.map_outlined),
+          label: const Text('Navigate to waiting student'),
+          onPressed: () async {
+            final student = TextEditingController();
+            final ride = TextEditingController();
+            final values = await showDialog<List<String>>(context: context, builder: (dialogContext) => AlertDialog(
+              title: const Text('Student pickup'),
+              content: Column(mainAxisSize: MainAxisSize.min, children: [
+                TextField(controller: student, decoration: const InputDecoration(labelText: 'Student user ID (UUID)')),
+                TextField(controller: ride, decoration: const InputDecoration(labelText: 'Ride ID (UUID)')),
+              ]),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+                ElevatedButton(onPressed: () => Navigator.pop(dialogContext, [student.text.trim(), ride.text.trim()]), child: const Text('Open map')),
+              ],
+            ));
+            if (values != null && values.length == 2 && values[0].isNotEmpty && values[1].isNotEmpty && mounted) {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => DriverPickupNavigationPage(
+                studentId: values[0], rideId: values[1], studentName: 'Waiting student')));
+            }
+          },
+        ),
+      ]))),
+      Card(child: Column(children: [
+        ListTile(title: const Text('Trip progress'), subtitle: Text(_stage)),
+        for (final stage in ['Heading to pickup', 'Passenger picked up', 'In transit', 'Arrived'])
+          RadioListTile<String>(dense: true, value: stage, groupValue: _stage, title: Text(stage), onChanged: (v) { if (v != null) { setState(() => _stage = v); widget.onStatusChanged(v); } }),
       ])),
-      Expanded(flex: 5, child: ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 18), children: [
-        Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('TRIP ROUTE', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          TextField(controller: _pickupController, decoration: const InputDecoration(labelText: 'Pickup location', prefixIcon: Icon(Icons.trip_origin))),
-          const SizedBox(height: 8),
-          TextField(controller: _destinationController, decoration: const InputDecoration(labelText: 'Destination', prefixIcon: Icon(Icons.flag_outlined))),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(onPressed: _isResolvingAddresses ? null : _resolveTripAddresses, icon: const Icon(Icons.route), label: Text(_isResolvingAddresses ? 'Finding locations…' : 'Update route on map')),
-          if (_routeError != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text(_routeError!, style: const TextStyle(color: Colors.red, fontSize: 12))),
-          const SizedBox(height: 8),
-          Row(children: [Expanded(child: ElevatedButton.icon(onPressed: _tracking || _loadingLocation ? null : _startTracking, icon: const Icon(Icons.gps_fixed), label: Text(_loadingLocation ? 'Getting GPS…' : 'Start live GPS'))), const SizedBox(width: 8), OutlinedButton(onPressed: _tracking ? _stopTracking : null, child: const Text('Stop'))]),
-          if (_latestPosition != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('GPS ${_latestPosition!.latitude.toStringAsFixed(6)}, ${_latestPosition!.longitude.toStringAsFixed(6)}  ·  ±${_latestPosition!.accuracy.toStringAsFixed(0)} m  ·  ${(_latestPosition!.speed * 3.6).toStringAsFixed(1)} km/h', style: const TextStyle(fontSize: 11, color: AppColors.textSecondary))),
-          const SizedBox(height: 4),
-          const Text('Allow location permission and run Chrome/Edge on localhost or HTTPS. The map uses OpenStreetMap tiles and OSRM road routing.', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-        ]))),
-        Card(child: Column(children: [
-          ListTile(title: const Text('Trip progress'), subtitle: Text(_stage)),
-          for (final stage in ['Heading to pickup', 'Passenger picked up', 'In transit', 'Arrived']) RadioListTile<String>(dense: true, value: stage, groupValue: _stage, title: Text(stage), onChanged: (v) { if (v != null) _setStage(v); }),
-        ])),
-        if (_remainingKm != null || _etaMinutes != null) Card(child: Padding(padding: const EdgeInsets.all(14), child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [Column(children: [const Text('Route distance'), Text(_remainingKm == null ? '--' : '${_remainingKm!.toStringAsFixed(2)} km', style: const TextStyle(fontWeight: FontWeight.bold))]), Column(children: [const Text('Estimated time'), Text(_etaMinutes == null ? '--' : '${_etaMinutes!.round()} min', style: const TextStyle(fontWeight: FontWeight.bold))])]))),
-        Card(child: SwitchListTile(title: const Text('Passenger check-in'), subtitle: Text(_checkedIn ? 'Passenger checked in' : 'Waiting for passenger'), value: _checkedIn, onChanged: (v) => setState(() => _checkedIn = v))),
-        OutlinedButton(onPressed: widget.onReport, child: const Text('Report a problem')),
-        ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white), onPressed: widget.onSos, icon: const Icon(Icons.sos), label: const Text('Emergency SOS')),
-      ])),
+      SwitchListTile(title: const Text('Passenger check-in'), subtitle: Text(_checkedIn ? 'Passenger checked in' : 'Waiting for passenger'), value: _checkedIn, onChanged: (v) => setState(() => _checkedIn = v)),
+      OutlinedButton(onPressed: widget.onReport, child: const Text('Report a problem')),
+      ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white), onPressed: widget.onSos, icon: const Icon(Icons.sos), label: const Text('Emergency SOS')),
     ]),
   );
 }

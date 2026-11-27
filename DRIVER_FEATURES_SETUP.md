@@ -25,9 +25,3 @@ The driver screen shows latitude, longitude, accuracy, speed, update time, and a
 
 ## Important integration boundary
 This source project does not include a configured backend, API base URL, Firebase/Supabase project, user authentication provider, or push service. Therefore driver registration and chat are local prototype persistence, not cross-device accounts or real-time remote messaging. To make students and drivers on different devices exchange messages, and to publish driver's live GPS to the student's ride map, connect a shared backend (for example, an existing REST/WebSocket service or Firebase) and authenticate each user. No server credentials or API endpoints were present in the uploaded project, so none have been invented.
-
-## Driver live road navigation
-
-The driver's **Active Trip** screen now uses the same Flutter Map + OpenStreetMap + Geolocator stack as the student live-navigation screen. It displays map tiles, the live driver marker, pickup and destination pins, an OSRM road-route polyline, route distance, estimated driving time, GPS accuracy and speed, map recentering, and the existing trip progress/check-in/report/SOS controls.
-
-Before starting GPS, verify or edit the pickup and destination address fields for the actual trip, then select **Update route on map**. The default Bitin Junction → CMDI Main Campus addresses are example trip values and should be changed to the passenger's actual pickup and destination. The driver marker updates from device GPS; the road route is refreshed after movement or a time interval. Chrome/Edge location access requires localhost or HTTPS and browser location permission. Map tiles use OpenStreetMap; route geometry uses the public OSRM demo service, so both require internet access and are subject to service availability/rate limits.
