@@ -1,8 +1,7 @@
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../../core/constants/app_colors.dart';
-import '../../shared/driver_chat_page.dart';
 
 // ==========================================
 // RIDE MODEL
@@ -63,7 +62,9 @@ class _FindRidePageState extends State<FindRidePage> {
 
   final List<String> vehicleFilters = [
     'All',
+    'Car',
     'Motorcycle',
+    'Van',
     'Shuttle',
     'Tricycle',
   ];
@@ -75,8 +76,8 @@ class _FindRidePageState extends State<FindRidePage> {
   final List<RideListing> rides = const [
     RideListing(
       driverName: 'Alex Santos',
-      vehicle: 'Passenger Tricycle',
-      vehicleType: 'Tricycle',
+      vehicle: 'Toyota Vios',
+      vehicleType: 'Car',
       plateNumber: 'ABC 1234',
       pickup: 'Bitin',
       destination: 'CMDI Main Campus',
@@ -498,22 +499,26 @@ class _FindRidePageState extends State<FindRidePage> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                ...options.map((option) {
-                  return RadioListTile<String>(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    activeColor: AppColors.primary,
-                    title: Text(
-                      option,
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                    value: option,
-                    groupValue: selectedSort,
-                    onChanged: (value) {
-                      Navigator.pop(sheetContext, value);
-                    },
-                  );
-                }),
+                RadioGroup<String>(
+                  groupValue: selectedSort,
+                  onChanged: (value) {
+                    Navigator.pop(sheetContext, value);
+                  },
+                  child: Column(
+                    children: options.map((option) {
+                      return RadioListTile<String>(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        activeColor: AppColors.primary,
+                        title: Text(
+                          option,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        value: option,
+                      );
+                    }).toList(),
+                  ),
+                ),
               ],
             ),
           ),
@@ -739,7 +744,7 @@ class _FindRidePageState extends State<FindRidePage> {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -777,7 +782,7 @@ class _FindRidePageState extends State<FindRidePage> {
                             ? Icons.two_wheeler
                             : ride.vehicleType == 'Shuttle'
                                 ? Icons.airport_shuttle_outlined
-                                : Icons.directions_bike,
+                                : Icons.directions_car_outlined,
                         color: AppColors.primary,
                         size: 21,
                       ),
@@ -909,21 +914,6 @@ class _FindRidePageState extends State<FindRidePage> {
                         ),
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 7),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () => Navigator.push(context, MaterialPageRoute(
-                      builder: (_) => DriverChatPage(
-                        conversationId: 'driver_jd',
-                        title: 'Message ${ride.driverName}',
-                        senderRole: 'Student',
-                      ),
-                    )),
-                    icon: const Icon(Icons.chat_bubble_outline, size: 17),
-                    label: const Text('Message Driver'),
                   ),
                 ),
               ],

@@ -12,6 +12,7 @@ import '../../../core/services/driver_safety_service.dart';
 import '../shared/driver_chat_page.dart';
 import '../../core/services/sharetrip_local_store.dart';
 import '../../core/services/backend_service.dart';
+import 'driver_feature_pages.dart';
 
 class DriverLoginPage extends StatefulWidget {
   const DriverLoginPage({super.key});
@@ -149,6 +150,7 @@ class _DriverPortalPageState extends State<DriverPortalPage> {
   Future<void> _notify(String title, String body) async {
     if (!mounted) return;
     setState(() => _notifications.insert(0, '$title — $body'));
+    await ShareTripLocalStore.addDriverNotification(title, body);
     try {
       await DriverNotificationService.instance.show(title, body, id: DateTime.now().millisecondsSinceEpoch ~/ 1000);
     } catch (_) {
@@ -386,7 +388,8 @@ class _DriverPortalPageState extends State<DriverPortalPage> {
       )),
       const SizedBox(height: 14),
       _card(child: Column(children: [
-        _menuRow(Icons.directions_car_outlined, 'My Vehicles', () => _open(_vehiclesPage())),
+        _menuRow(Icons.directions_car_outlined, 'My Vehicles', () => _open(const DriverVehicleManagerPage())),
+        _menuRow(Icons.edit_outlined, 'Edit Driver Profile', () => _open(const DriverProfileEditorPage())),
         _menuRow(Icons.folder_open_outlined, 'Documents & Verification', () => _open(_documentsPage())),
         _menuRow(Icons.star_outline, 'Passenger Reviews', () => _open(_simplePage('Passenger Reviews', ['★★★★★  Andrea Jimenez', '★★★★★  Paolo Reyes']))),
         _menuRow(Icons.schedule, 'Schedule & Notifications', () => _open(_driverSettingsPage())),
@@ -482,7 +485,10 @@ class _DriverPortalPageState extends State<DriverPortalPage> {
     onStatusChanged: (status) => _notify('Trip update', status),
   );
 
-  Widget _notificationsPage() => Scaffold(
+  Widget _notificationsPage() => const DriverNotificationCenterPage();
+
+/* legacy local notification list retained for compatibility
+Widget _legacyNotificationsPage() => Scaffold(
     appBar: AppBar(title: const Text('Notifications')),
     body: _notifications.isEmpty
         ? const Center(child: Text('You are all caught up.'))
@@ -498,6 +504,7 @@ class _DriverPortalPageState extends State<DriverPortalPage> {
           ),
   );
 
+*/
   Widget _safetyPage() => Scaffold(
     appBar: AppBar(title: const Text('Driver Safety Center')),
     body: ListView(padding: const EdgeInsets.all(18), children: [
@@ -530,12 +537,7 @@ class _DriverPortalPageState extends State<DriverPortalPage> {
 
   Widget _sosPage() => _DriverSosScreen(safety: _safety);
 
-  Widget _vehiclesPage() => _simplePage('My Vehicles', [
-    'Allowed vehicle types: Shuttle, Motorcycle, Tricycle',
-    'Register your vehicle details during driver registration.',
-  ], actions: [
-    ('Add Vehicle', () => _message('Vehicle type options: Shuttle, Motorcycle, Tricycle.')),
-  ]);
+  Widget _vehiclesPage() => const DriverVehicleManagerPage();
 
   Widget _documentsPage() => _simplePage('Documents & Verification', [
     ..._documents.map((d) => '$d · Submitted for review'),

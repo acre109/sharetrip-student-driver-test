@@ -45,4 +45,37 @@ class ShareTripLocalStore {
     }
     return result;
   }
+  static const _vehiclesKey = 'sharetrip_driver_vehicles';
+  static const _driverNotificationsKey = 'sharetrip_driver_notifications';
+
+  static Future<List<Map<String, dynamic>>> getDriverVehicles() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_vehiclesKey) ?? '[]';
+    return (jsonDecode(raw) as List).map((v) => Map<String, dynamic>.from(v as Map)).toList();
+  }
+
+  static Future<void> saveDriverVehicles(List<Map<String, dynamic>> vehicles) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_vehiclesKey, jsonEncode(vehicles));
+  }
+
+  static Future<List<Map<String, dynamic>>> getDriverNotifications() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_driverNotificationsKey) ?? '[]';
+    return (jsonDecode(raw) as List).map((v) => Map<String, dynamic>.from(v as Map)).toList();
+  }
+
+  static Future<void> addDriverNotification(String title, String message) async {
+    final items = await getDriverNotifications();
+    items.insert(0, {'title': title, 'message': message, 'time': DateTime.now().toIso8601String(), 'read': false});
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_driverNotificationsKey, jsonEncode(items));
+  }
+
+  static Future<void> markDriverNotificationsRead() async {
+    final items = await getDriverNotifications();
+    for (final item in items) { item['read'] = true; }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_driverNotificationsKey, jsonEncode(items));
+  }
 }

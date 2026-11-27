@@ -10,7 +10,6 @@ import 'package:latlong2/latlong.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/services/location_service.dart';
-import '../../../core/services/backend_service.dart';
 import '../my_rides/my_rides_page.dart';
 
 class RideMapPage extends StatefulWidget {
@@ -77,23 +76,6 @@ class _RideMapPageState extends State<RideMapPage> {
   void dispose() {
     _positionSubscription?.cancel();
     super.dispose();
-  }
-
-  Future<void> _publishWaitingStudentLocation(Position position) async {
-    // Demo ride IDs in this archive are not database UUIDs. Only publish for a
-    // real Supabase ride so the driver's RLS-scoped subscription can find it.
-    final rideId = widget.ride.id;
-    final uuid = RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$');
-    if (!uuid.hasMatch(rideId)) return;
-    try {
-      await BackendService.instance.upsertStudentLocation(
-        rideId: rideId, latitude: position.latitude,
-        longitude: position.longitude, accuracy: position.accuracy,
-      );
-    } catch (_) {
-      // Keep map navigation usable if backend isn't configured; show backend
-      // setup requirements in the accompanying README.
-    }
   }
 
   // --------------------------------------------------
@@ -232,7 +214,6 @@ class _RideMapPageState extends State<RideMapPage> {
       });
 
       _moveToCurrentLocation();
-      await _publishWaitingStudentLocation(position);
 
       // Get a live route from the current location
       // to the destination.
@@ -273,9 +254,6 @@ class _RideMapPageState extends State<RideMapPage> {
             _hasArrived =
                 distanceToDestination <= _arrivalDistanceMeters;
           });
-
-          // Share the waiting student's live pickup position with the assigned driver.
-          _publishWaitingStudentLocation(position);
 
           // Automatically follow the user's GPS location.
           if (_followLocation) {
@@ -488,8 +466,8 @@ class _RideMapPageState extends State<RideMapPage> {
                     ),
 
                     // MAP ATTRIBUTION
-                    RichAttributionWidget(
-                      attributions: [
+                    const RichAttributionWidget(
+                      attributions: const [
                         TextSourceAttribution(
                           'OpenStreetMap contributors',
                         ),
