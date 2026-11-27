@@ -17,7 +17,6 @@
         "http",
         "image_picker",
         "latlong2",
-        "material_ui",
         "shared_preferences",
         "supabase_flutter",
         "url_launcher"
@@ -207,19 +206,6 @@
         "http_parser",
         "meta",
         "web"
-      ]
-    },
-    {
-      "name": "material_ui",
-      "version": "1.11.1",
-      "dependencies": [
-        "collection",
-        "cupertino_ui",
-        "flutter",
-        "flutter_localizations",
-        "intl",
-        "material_color_utilities",
-        "vector_math"
       ]
     },
     {
@@ -770,25 +756,6 @@
         "source_span",
         "string_scanner",
         "typed_data"
-      ]
-    },
-    {
-      "name": "flutter_localizations",
-      "version": "0.0.0",
-      "dependencies": [
-        "flutter",
-        "intl",
-        "path"
-      ]
-    },
-    {
-      "name": "cupertino_ui",
-      "version": "1.1.7",
-      "dependencies": [
-        "collection",
-        "flutter",
-        "flutter_localizations",
-        "intl"
       ]
     },
     {
